@@ -2,7 +2,7 @@
 
 Repositorio de demostración para la sesión **Microsoft Fabric Databases: desarrollando una solución RAG** en *Charlemos de SQL Server*.
 
-La demo despliega por código una aplicación RAG empresarial para **FraSoHome**, un retailer ficticio de hogar y decoración. El caso central es una solicitud de devolución de un sofá modular con daño de transporte. La solución combina:
+La demo despliega por código una aplicación RAG empresarial para **FraSoHome**, un retailer ficticio de hogar y decoración. El caso central es una solicitud de devolución de un sofá modular con daño durante el transporte. La solución combina:
 
 - **SQL Database in Microsoft Fabric** para datos operacionales, políticas, chunks, recuperación SQL y auditoría.
 - **Fabric User Data Functions** como backend Python serverless para orquestar el RAG.
