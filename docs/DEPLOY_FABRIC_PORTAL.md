@@ -103,10 +103,10 @@ database/sql/06_create_security.sql
 database/sql/07_create_hybrid_search.sql
 ```
 
-Opcionalmente, si tu tenant tiene habilitadas las capacidades vectoriales SQL preview, ejecuta tambien:
+Opcionalmente, si tu tenant tiene un `EXTERNAL MODEL` de embeddings configurado y quieres regenerar embeddings dentro de SQL con funciones AI-native, ejecuta tambien:
 
 ```text
-database/sql/90_optional_vector_preview.sql
+database/sql/90_optional_sql_native_embeddings.sql
 ```
 
 Al terminar, ejecuta el smoke test:

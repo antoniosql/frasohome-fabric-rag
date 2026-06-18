@@ -4,7 +4,8 @@ Genera un script SQL de ingesta RAG a partir de politicas Markdown.
 
 El flujo evita dependencias nuevas: lee documentos Markdown con frontmatter simple,
 crea chunks por secciones/parrafos, calcula embeddings deterministas de demo y
-emite SQL idempotente para rag.Documents, rag.Chunks y rag.ChunkEmbeddings.
+emite SQL idempotente para rag.Documents, rag.Chunks y rag.ChunkEmbeddings con
+embeddings nativos VECTOR(1536).
 """
 from __future__ import annotations
 
@@ -220,8 +221,12 @@ def chunk_document(document: Document, max_chars: int, dimensions: int, embeddin
 def sql_string(value: str | None, unicode: bool = True) -> str:
     if value is None or value == "":
         return "NULL"
+    escaped = value.replace(chr(39), chr(39) + chr(39))
+    if unicode and len(escaped) > 3500:
+        parts = [escaped[i : i + 3500] for i in range(0, len(escaped), 3500)]
+        return "CONCAT(CAST(N'' AS nvarchar(max)), " + ", ".join(f"N'{part}'" for part in parts) + ")"
     prefix = "N" if unicode else ""
-    return f"{prefix}'{value.replace(chr(39), chr(39) + chr(39))}'"
+    return f"{prefix}'{escaped}'"
 
 
 def sql_date(value: str | None) -> str:
@@ -294,10 +299,16 @@ def render_sql(documents: list[Document], chunks_by_document: dict[str, list[Chu
                     f"    {sql_date(document.valid_from)}, {sql_date(document.valid_to)}, {sql_string(chunk.keywords)}",
                     ");",
                     "SET @ChunkId = CONVERT(bigint, SCOPE_IDENTITY());",
-                    "INSERT INTO rag.ChunkEmbeddings(ChunkId, EmbeddingModel, EmbeddingDimensions, EmbeddingJson)",
+                    "INSERT INTO rag.ChunkEmbeddings",
+                    "(",
+                    "    ChunkId, EmbeddingProvider, EmbeddingModel, EmbeddingDimensions,",
+                    "    EmbeddingVector, SourceTextHash",
+                    ")",
                     "VALUES",
                     "(",
-                    f"    @ChunkId, {sql_string(embedding_model)}, {len(chunk.embedding)}, {sql_string(embedding_json)}",
+                    f"    @ChunkId, 'demo', {sql_string(embedding_model)}, {len(chunk.embedding)},",
+                    f"    CAST({sql_string(embedding_json)} AS vector(1536)),",
+                    "    HASHBYTES('SHA2_256', CONVERT(varbinary(max), " + sql_string(chunk.text) + "))",
                     ");",
                     "",
                 ]
@@ -343,7 +354,7 @@ def main() -> None:
     parser.add_argument("--source-dir", type=Path, default=DEFAULT_SOURCE_DIR)
     parser.add_argument("--out", type=Path, default=DEFAULT_OUT)
     parser.add_argument("--max-chars", type=int, default=900)
-    parser.add_argument("--dimensions", type=int, default=int(os.getenv("RAG_EMBEDDING_DIMENSIONS", "64")))
+    parser.add_argument("--dimensions", type=int, default=int(os.getenv("RAG_EMBEDDING_DIMENSIONS", "1536")))
     parser.add_argument("--embedding-provider", choices=["demo", "azure-openai"], default=os.getenv("RAG_EMBEDDING_PROVIDER"))
     parser.add_argument("--embedding-model", default=None)
     parser.add_argument("--preview-question", default=DEFAULT_QUESTION)

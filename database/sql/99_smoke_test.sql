@@ -14,9 +14,27 @@ SELECT TOP 5
     d.DocumentCode,
     d.DocumentTitle,
     c.ChunkNumber,
-    c.ChunkText
+    c.ChunkText,
+    ce.EmbeddingModel,
+    ce.EmbeddingProvider,
+    ce.EmbeddingDimensions
 FROM rag.Chunks AS c
 JOIN rag.Documents AS d
     ON d.DocumentId = c.DocumentId
+LEFT JOIN rag.ChunkEmbeddings AS ce
+    ON ce.ChunkId = c.ChunkId
 ORDER BY d.DocumentCode, c.ChunkNumber;
+GO
+
+IF NOT EXISTS (SELECT 1 FROM rag.ChunkEmbeddings WHERE EmbeddingVector IS NOT NULL)
+BEGIN
+    THROW 51000, 'No hay embeddings vectoriales cargados en rag.ChunkEmbeddings.', 1;
+END;
+GO
+
+SELECT
+    EmbeddingRows = COUNT_BIG(*),
+    DistinctModels = COUNT(DISTINCT EmbeddingModel),
+    Dimensions = MIN(EmbeddingDimensions)
+FROM rag.ChunkEmbeddings;
 GO

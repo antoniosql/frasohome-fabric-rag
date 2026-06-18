@@ -9,7 +9,7 @@ La demo despliega por código una aplicación RAG empresarial para **FraSoHome**
 - **Fabric Apps / Rayfin** como frontend web desplegable en Fabric.
 - **Fabric CLI (`fab`)**, `sqlcmd`, Python y Node.js para automatizar el despliegue.
 
-> La demo está diseñada para que pueda ejecutarse incluso si las capacidades vectoriales SQL preview no están disponibles en tu tenant. Por defecto usa recuperación híbrida determinista en T-SQL + ranking en Python. El script `database/sql/90_optional_vector_preview.sql` deja preparado el camino para `vector`/`VECTOR_DISTANCE` cuando lo tengas habilitado.
+> La demo usa las capacidades RAG modernas de SQL Database in Microsoft Fabric: embeddings almacenados como `VECTOR(1536)`, scoring semántico con `VECTOR_DISTANCE`, búsqueda híbrida lexical + vectorial y un script opcional para vectorización SQL-native con `AI_GENERATE_CHUNKS` / `AI_GENERATE_EMBEDDINGS`.
 
 ## Arquitectura
 
@@ -370,7 +370,7 @@ docs/policies/*.md
 tools/ingest_policy_markdown.py
         ├─ lee frontmatter
         ├─ genera chunks por secciones/párrafos
-        ├─ calcula embeddings deterministas de demo
+        ├─ calcula embeddings deterministas de demo o Azure OpenAI
         └─ emite SQL idempotente
         │
         ▼
@@ -392,17 +392,18 @@ El smoke test comprueba que los documentos Markdown `MD-POL-DMG-010` y `MD-POL-V
 El cliente Gold quiere devolver un sofá modular comprado online hace 34 días. Indica que llegó con una pata dañada, conserva fotos del embalaje y solicita reemplazo urgente. ¿Debemos aprobar devolución, reemplazo o revisión manual?
 ```
 
-Los embeddings generados son deterministas y locales (`demo-hash-embedding-v1`) para que la demo no dependa de servicios externos. En una implantación real, esa función sería el punto natural para llamar a Azure OpenAI / Foundry embeddings y guardar el vector resultante en `rag.ChunkEmbeddings` o en una columna `vector` si está habilitada.
+Los embeddings generados son deterministas y locales (`demo-hash-embedding-v1`) para que la demo no dependa de servicios externos, pero ya se guardan en `rag.ChunkEmbeddings.EmbeddingVector` como `VECTOR(1536)`. Para producción puedes cambiar el proveedor a Azure OpenAI/Foundry desde los scripts Python o ejecutar `database/sql/90_optional_sql_native_embeddings.sql` tras registrar un `EXTERNAL MODEL` en la base.
 
 ## Búsqueda híbrida lexical + vectorial
 
-La recuperación base de la UDF usa `rag.usp_get_candidate_chunks`: filtra por contexto del caso y calcula un score lexical de negocio con T-SQL. Para enseñar un patrón híbrido más realista, el repo añade `rag.usp_get_hybrid_candidate_chunks`.
+La recuperación base de la UDF usa `rag.usp_get_hybrid_candidate_chunks`: filtra por contexto del caso, calcula un score lexical de negocio con T-SQL y combina ese score con similitud semántica nativa. `rag.usp_get_candidate_chunks` queda como fallback lexical.
 
 Ese procedimiento combina:
 
 - **Lexical score**: coincidencias por país, canal, categoría, vigencia y señales como daño, embalaje, fotos, reemplazo, stock, cliente Gold/Platinum o producto voluminoso.
-- **Vector score**: similitud coseno entre el embedding de la pregunta y los embeddings guardados en `rag.ChunkEmbeddings`.
+- **Vector score**: similitud coseno entre el embedding de la pregunta y `rag.ChunkEmbeddings.EmbeddingVector`, calculada con `VECTOR_DISTANCE`.
 - **Hybrid score**: mezcla ponderada de ambos scores.
+- **ANN opcional**: `rag.usp_get_ann_candidate_chunks` usa `VECTOR_SEARCH`; `database/sql/08_create_vector_indexes.sql` crea un índice DiskANN cuando haya suficientes vectores.
 
 Ejecuta una búsqueda híbrida de prueba:
 

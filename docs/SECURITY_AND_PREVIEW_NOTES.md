@@ -16,12 +16,13 @@ Buenas prácticas incluidas:
 - Filtros por vigencia, país, canal y categoría.
 - Respuesta con `confidence` y `requiresManualReview`.
 - Auditoría en `rag.AnswerAudit`.
-- Fallback cuando el contexto no es suficiente.
+- Recuperación híbrida con filtros de negocio, score lexical y `VECTOR_DISTANCE`.
+- Fallback lexical cuando una ejecución de UDF no puede usar la ruta vectorial.
 
 ## Funcionalidades preview
 
-Fabric Apps, User Data Functions y capacidades vectoriales SQL pueden estar en preview o tener disponibilidad regional/tenant. Por eso el repositorio incluye:
+Fabric Apps, User Data Functions, vector indexes y funciones AI SQL-native pueden estar en preview o tener disponibilidad regional/tenant. Por eso el repositorio incluye:
 
-- Camino principal robusto basado en T-SQL y Python.
-- Script opcional de `vector` para tenants que ya tengan la funcionalidad.
+- Camino principal vector-first con `VECTOR(1536)` y embeddings deterministas generados por Python.
+- Script opcional `database/sql/90_optional_sql_native_embeddings.sql` para tenants con `AI_GENERATE_CHUNKS`, `AI_GENERATE_EMBEDDINGS` y un `EXTERNAL MODEL` configurado.
 - Pasos manuales claros para URL pública UDF y app registration.

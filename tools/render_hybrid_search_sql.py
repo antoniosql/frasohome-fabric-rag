@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Renderiza una consulta SQL para ejecutar búsqueda híbrida real:
-score lexical T-SQL + similitud vectorial contra rag.ChunkEmbeddings.
+score lexical T-SQL + VECTOR_DISTANCE contra rag.ChunkEmbeddings.
 """
 from __future__ import annotations
 
@@ -22,7 +22,11 @@ DEFAULT_QUESTION = (
 
 def sql_string(value: str, unicode: bool = True) -> str:
     prefix = "N" if unicode else ""
-    return f"{prefix}'{value.replace(chr(39), chr(39) + chr(39))}'"
+    escaped = value.replace(chr(39), chr(39) + chr(39))
+    if unicode and len(escaped) > 3500:
+        parts = [escaped[i : i + 3500] for i in range(0, len(escaped), 3500)]
+        return "CONCAT(CAST(N'' AS nvarchar(max)), " + ", ".join(f"N'{part}'" for part in parts) + ")"
+    return f"{prefix}'{escaped}'"
 
 
 def render_sql(args: argparse.Namespace) -> str:
@@ -55,7 +59,7 @@ def main() -> None:
     parser.add_argument("--out", type=Path, default=Path("database/generated/hybrid_search_query.sql"))
     parser.add_argument("--return-case-id", default="RET-2026-004219")
     parser.add_argument("--question", default=DEFAULT_QUESTION)
-    parser.add_argument("--dimensions", type=int, default=int(os.getenv("RAG_EMBEDDING_DIMENSIONS", "64")))
+    parser.add_argument("--dimensions", type=int, default=int(os.getenv("RAG_EMBEDDING_DIMENSIONS", "1536")))
     parser.add_argument("--embedding-provider", choices=["demo", "azure-openai"], default=os.getenv("RAG_EMBEDDING_PROVIDER"))
     parser.add_argument("--embedding-model", default=None)
     parser.add_argument("--top-n", type=int, default=8)

@@ -1,5 +1,8 @@
 import json
 import logging
+import hashlib
+import math
+import re
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any, Dict, List
@@ -9,6 +12,8 @@ import fabric.functions as fn
 udf = fn.UserDataFunctions()
 SQL_ALIAS = 'frasohomesql'
 MODEL_NAME = "frasohome-rag-rulebased-v1"
+EMBEDDING_MODEL = "demo-hash-embedding-v1"
+EMBEDDING_DIMENSIONS = 1536
 
 
 def _json_default(value: Any) -> Any:
@@ -34,6 +39,18 @@ def _first_row(cursor) -> Dict[str, Any]:
     return rows[0] if rows else {}
 
 
+def _embed_text(text: str, dimensions: int = EMBEDDING_DIMENSIONS) -> List[float]:
+    vec = [0.0] * dimensions
+    tokens = re.findall(r"[\wáéíóúüñ]+", text.lower())
+    for token in tokens:
+        digest = hashlib.sha256(token.encode("utf-8")).digest()
+        idx = int.from_bytes(digest[:4], "big") % dimensions
+        sign = 1.0 if digest[4] % 2 == 0 else -1.0
+        vec[idx] += sign
+    norm = math.sqrt(sum(v * v for v in vec)) or 1.0
+    return [round(v / norm, 6) for v in vec]
+
+
 def _execute_context(conn, return_case_id: str) -> Dict[str, Any]:
     cursor = conn.cursor()
     cursor.execute("EXEC rag.usp_get_return_case_context ?", return_case_id)
@@ -42,7 +59,19 @@ def _execute_context(conn, return_case_id: str) -> Dict[str, Any]:
 
 def _execute_chunks(conn, return_case_id: str, question: str, max_chunks: int) -> List[Dict[str, Any]]:
     cursor = conn.cursor()
-    cursor.execute("EXEC rag.usp_get_candidate_chunks ?, ?, ?", return_case_id, question, max_chunks)
+    question_embedding_json = json.dumps(_embed_text(question), separators=(",", ":"))
+    try:
+        cursor.execute(
+            "EXEC rag.usp_get_hybrid_candidate_chunks ?, ?, ?, ?, ?",
+            return_case_id,
+            question,
+            question_embedding_json,
+            EMBEDDING_MODEL,
+            max_chunks,
+        )
+    except Exception:
+        logging.exception("Hybrid vector retrieval failed. Falling back to lexical retrieval.")
+        cursor.execute("EXEC rag.usp_get_candidate_chunks ?, ?, ?", return_case_id, question, max_chunks)
     return _rows_to_dicts(cursor)
 
 

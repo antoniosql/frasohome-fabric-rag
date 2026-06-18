@@ -18,10 +18,6 @@ if ($sqlAuthMode -eq "service-principal") {
 
 $sqlScripts = @()
 $sqlScripts += Get-ChildItem -Path "database/sql/[0-8][0-9]_*.sql" | Sort-Object Name
-$optionalVectorScript = "database/sql/90_optional_vector_preview.sql"
-if (Test-Path -LiteralPath $optionalVectorScript) {
-    $sqlScripts += Get-Item -LiteralPath $optionalVectorScript
-}
 
 foreach ($script in $sqlScripts) {
     Write-Host "Aplicando $($script.FullName)"

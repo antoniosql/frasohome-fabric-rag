@@ -9,13 +9,13 @@ La solución ayuda a un agente a decidir si debe aprobar una devolución, un ree
 - Datos operacionales de clientes, pedidos, productos, stock y casos de devolución.
 - Políticas internas versionadas como documentos de conocimiento.
 - Chunks recuperables con metadatos de negocio.
-- Embeddings almacenados para preparar escenarios semánticos.
-- Procedimientos SQL para recuperación contextual.
+- Embeddings almacenados como vectores nativos `VECTOR(1536)`.
+- Procedimientos SQL para recuperación contextual, búsqueda vectorial y búsqueda híbrida.
 - Una **Fabric User Data Function** en Python como backend serverless.
 - Una **Fabric App** en React/Vite desplegada con Rayfin.
 - Auditoría completa de cada recomendación generada.
 
-La idea principal es que **SQL Database in Microsoft Fabric** actúa como capa de control del RAG: almacena los datos, aplica filtros de negocio, recupera evidencias, centraliza permisos y deja trazabilidad auditable.
+La idea principal es que **SQL Database in Microsoft Fabric** actúa como capa de control del RAG: almacena los datos, aplica filtros de negocio, guarda embeddings nativos, calcula similitud vectorial, recupera evidencias, centraliza permisos y deja trazabilidad auditable.
 
 ## Arquitectura en ejecución
 
@@ -33,9 +33,12 @@ SQL Database in Microsoft Fabric
         ├─ fraso.*: datos operacionales
         ├─ rag.Documents: documentos de conocimiento
         ├─ rag.Chunks: fragmentos recuperables
-        ├─ rag.ChunkEmbeddings: embeddings por chunk
+        ├─ rag.ChunkEmbeddings: embeddings nativos VECTOR(1536)
         ├─ rag.usp_get_return_case_context
         ├─ rag.usp_get_candidate_chunks
+        ├─ rag.usp_get_hybrid_candidate_chunks
+        ├─ rag.usp_get_vector_candidate_chunks
+        ├─ rag.usp_get_ann_candidate_chunks
         └─ rag.AnswerAudit
 ```
 
@@ -70,7 +73,8 @@ Modela la parte RAG:
 
 - `rag.Documents`: documentos internos versionados.
 - `rag.Chunks`: fragmentos recuperables, con metadatos de canal, categoría, país, vigencia y keywords.
-- `rag.ChunkEmbeddings`: embeddings asociados a cada chunk.
+- `rag.ChunkEmbeddings`: embeddings nativos `VECTOR(1536)` asociados a cada chunk, con proveedor, modelo, dimensiones, hash de origen y fecha de vectorización.
+- `rag.VectorizationRuns`: trazabilidad de ejecuciones de vectorización.
 - `rag.AnswerAudit`: auditoría de preguntas, recuperación, recomendación, evidencias y modelo usado.
 
 La separación permite cruzar datos transaccionales y conocimiento documental desde SQL.
@@ -95,7 +99,7 @@ Calcula elementos útiles para la decisión:
 
 Recupera los chunks candidatos para un caso y una pregunta.
 
-La recuperación principal sigue siendo determinista en T-SQL, sin depender de vector search. Usa filtros y scoring por:
+Es la recuperación lexical explicable y queda como fallback. Usa filtros y scoring por:
 
 - País.
 - Canal.
@@ -103,7 +107,56 @@ La recuperación principal sigue siendo determinista en T-SQL, sin depender de v
 - Vigencia de la política.
 - Señales de daño, embalaje, fotos, reemplazo, stock, cliente Gold/Platinum y producto voluminoso.
 
-Esto hace que la demo funcione incluso en tenants donde el tipo `vector` o `VECTOR_DISTANCE` todavía no estén disponibles.
+Esto permite comparar la parte puramente lexical con la recuperación híbrida y mantener una ruta de contingencia si la UDF no puede ejecutar el procedimiento vectorial.
+
+### `rag.usp_get_vector_candidate_chunks`
+
+Ejecuta búsqueda vectorial exacta sobre `rag.ChunkEmbeddings.EmbeddingVector`.
+
+Recibe el embedding de la pregunta como JSON, lo convierte a `vector(1536)` y calcula:
+
+```sql
+VECTOR_DISTANCE('cosine', @questionVector, ce.EmbeddingVector)
+```
+
+Devuelve `VectorDistance`, `VectorScore` y los metadatos del chunk.
+
+### `rag.usp_get_ann_candidate_chunks`
+
+Ejecuta búsqueda aproximada con `VECTOR_SEARCH`.
+
+Usa la sintaxis moderna de Fabric Database / SQL:
+
+```sql
+SELECT TOP (@topN) WITH APPROXIMATE
+FROM VECTOR_SEARCH(...)
+ORDER BY distance;
+```
+
+Si existe un índice DiskANN compatible, SQL puede usarlo. Si no existe, la consulta sigue pudiendo usar kNN exacto según las capacidades disponibles.
+
+### `rag.usp_get_hybrid_candidate_chunks`
+
+Es la ruta principal de recuperación RAG.
+
+Combina:
+
+- `LexicalScore`: señales de negocio y coincidencia textual.
+- `VectorScore`: similitud semántica calculada con `VECTOR_DISTANCE`.
+- `HybridScore`: mezcla ponderada de ambas señales.
+
+Por defecto:
+
+```text
+HybridScore = 0.55 * LexicalNormalized + 0.45 * VectorScore
+```
+
+Los pesos se controlan con:
+
+```dotenv
+RAG_HYBRID_LEXICAL_WEIGHT="0.55"
+RAG_HYBRID_VECTOR_WEIGHT="0.45"
+```
 
 ### `rag.usp_insert_answer_audit`
 
@@ -151,7 +204,7 @@ tools/ingest_policy_markdown.py
         ├─ extrae contenido Markdown
         ├─ genera chunks por secciones y párrafos
         ├─ infiere keywords de apoyo
-        ├─ calcula embeddings deterministas de demo
+        ├─ calcula embeddings deterministas de demo o Azure OpenAI
         └─ genera SQL idempotente
         │
         ▼
@@ -160,7 +213,7 @@ scripts/ingest_policy_markdown.ps1
         └─ ejecuta smoke test de recuperación
         │
         ▼
-rag.Documents / rag.Chunks / rag.ChunkEmbeddings
+rag.Documents / rag.Chunks / rag.ChunkEmbeddings(VECTOR(1536))
 ```
 
 ### Documentos Markdown de ejemplo
@@ -205,7 +258,7 @@ Con los dos documentos actuales, el generador produce:
 - 2 documentos.
 - 7 chunks.
 
-### Generación de embeddings
+### Generación de embeddings vectoriales
 
 Los embeddings se calculan de forma local y determinista con `tools/seed_embeddings.py`.
 
@@ -222,15 +275,27 @@ El algoritmo:
 3. Usa el hash para elegir una dimensión del vector.
 4. Suma `+1` o `-1` según el hash.
 5. Normaliza el vector.
-6. Guarda el vector como JSON en `rag.ChunkEmbeddings.EmbeddingJson`.
+6. Emite el vector como array JSON.
+7. El SQL generado lo convierte y guarda como `VECTOR(1536)` en `rag.ChunkEmbeddings.EmbeddingVector`.
 
-Por defecto genera vectores de 64 dimensiones, controlados por:
+Por defecto genera vectores de 1536 dimensiones, compatibles con modelos habituales como `text-embedding-ada-002` o `text-embedding-3-small`:
 
 ```dotenv
-RAG_EMBEDDING_DIMENSIONS="64"
+RAG_EMBEDDING_DIMENSIONS="1536"
 ```
 
-Este embedding no pretende sustituir a Azure OpenAI o Foundry embeddings. Sirve para que la demo tenga un flujo completo reproducible sin depender de servicios externos. En producción, este punto sería el lugar natural para llamar a un modelo real de embeddings y guardar el vector resultante.
+Este embedding no pretende sustituir a Azure OpenAI o Foundry embeddings. Sirve para que la demo tenga un flujo completo reproducible sin depender de servicios externos, pero usando el mismo tipo nativo `vector` que usaría una solución real.
+
+En producción, el mismo generador puede usar Azure OpenAI configurando:
+
+```dotenv
+RAG_EMBEDDING_PROVIDER="azure-openai"
+RAG_USE_EXTERNAL_MODELS="true"
+AZURE_OPENAI_ENDPOINT="https://<recurso>.openai.azure.com"
+AZURE_OPENAI_API_KEY="<api-key>"
+AZURE_OPENAI_EMBEDDING_DEPLOYMENT="<deployment-name>"
+AZURE_OPENAI_API_VERSION="2024-10-21"
+```
 
 ### Inserción en SQL
 
@@ -248,7 +313,8 @@ La inserción hace:
 2. Borrado de embeddings anteriores del documento.
 3. Borrado de chunks anteriores del documento.
 4. Inserción de chunks nuevos en `rag.Chunks`.
-5. Inserción de embeddings nuevos en `rag.ChunkEmbeddings`.
+5. Inserción de embeddings nuevos en `rag.ChunkEmbeddings.EmbeddingVector`.
+6. Registro de la ejecución en `rag.VectorizationRuns`.
 
 El flujo se ejecuta con:
 
@@ -307,9 +373,9 @@ La razón es que los documentos Markdown contienen señales relevantes para el s
 
 ### Recuperación actual
 
-La ruta principal de la UDF usa `rag.usp_get_candidate_chunks`.
+La ruta principal de la UDF usa `rag.usp_get_hybrid_candidate_chunks`.
 
-Ese procedimiento realiza una recuperación determinista en SQL:
+Ese procedimiento realiza una recuperación híbrida en SQL:
 
 1. Lee el contexto del caso (`ReturnCaseId`).
 2. Extrae categoría, canal, fecha de apertura, motivo, fotos y si el producto es voluminoso.
@@ -326,11 +392,14 @@ Ese procedimiento realiza una recuperación determinista en SQL:
    - Producto voluminoso.
    - Cliente Gold/Platinum.
    - Stock.
-5. Devuelve los chunks ordenados por score.
+5. Convierte el embedding de la pregunta a `vector(1536)`.
+6. Calcula distancia coseno con `VECTOR_DISTANCE`.
+7. Combina score lexical normalizado y score vectorial.
+8. Devuelve los chunks ordenados por `HybridScore`.
 
-Es una búsqueda muy explicable, pero no semántica: depende de reglas y coincidencias textuales.
+`rag.usp_get_candidate_chunks` se conserva como fallback lexical explicable.
 
-### Nuevo flujo híbrido real
+### Flujo híbrido real
 
 Para búsquedas híbridas se ha añadido:
 
@@ -349,7 +418,7 @@ rag.usp_get_hybrid_candidate_chunks
 Este procedimiento combina dos señales:
 
 - `LexicalScore`: el mismo scoring contextual de negocio que usa la recuperación actual.
-- `VectorScore`: similitud coseno entre el embedding de la pregunta y el embedding del chunk en `rag.ChunkEmbeddings`.
+- `VectorScore`: similitud coseno entre el embedding de la pregunta y `rag.ChunkEmbeddings.EmbeddingVector`.
 
 Después calcula:
 
@@ -377,8 +446,8 @@ tools/render_hybrid_search_sql.py
         ▼
 rag.usp_get_hybrid_candidate_chunks
         ├─ calcula score lexical
-        ├─ parsea embeddings JSON con OPENJSON
-        ├─ calcula similitud coseno
+        ├─ convierte la pregunta a vector(1536)
+        ├─ calcula VECTOR_DISTANCE('cosine', ...)
         └─ devuelve ranking híbrido
 ```
 
@@ -389,6 +458,31 @@ Para probarlo:
 ```
 
 Ese script aplica el procedimiento híbrido, genera `database/generated/hybrid_search_query.sql` y ejecuta la búsqueda contra SQL Database.
+
+### Búsqueda vectorial exacta y aproximada
+
+El repo incluye también:
+
+```sql
+rag.usp_get_vector_candidate_chunks
+rag.usp_get_ann_candidate_chunks
+```
+
+`rag.usp_get_vector_candidate_chunks` usa `VECTOR_DISTANCE`, que calcula distancia exacta.
+
+`rag.usp_get_ann_candidate_chunks` usa `VECTOR_SEARCH` con:
+
+```sql
+SELECT TOP (@topN) WITH APPROXIMATE
+```
+
+Para acelerar la búsqueda aproximada cuando haya suficiente volumen, se añade:
+
+```text
+database/sql/08_create_vector_indexes.sql
+```
+
+Ese script crea un índice DiskANN sobre `rag.ChunkEmbeddings.EmbeddingVector` cuando hay al menos 100 vectores no nulos. La semilla de demo tiene menos registros, así que el script omite el índice hasta que el corpus crezca.
 
 ### Embeddings de demo y embeddings reales
 
@@ -436,11 +530,13 @@ Expone tres funciones:
 
 1. Valida `returnCaseId`, `question` y `maxChunks`.
 2. Ejecuta `rag.usp_get_return_case_context`.
-3. Ejecuta `rag.usp_get_candidate_chunks`.
-4. Aplica reglas Python deterministas.
-5. Construye recomendación, motivos, acciones y evidencias.
-6. Guarda auditoría con `rag.usp_insert_answer_audit`.
-7. Devuelve JSON al frontend.
+3. Genera un embedding determinista de la pregunta con `demo-hash-embedding-v1`.
+4. Ejecuta `rag.usp_get_hybrid_candidate_chunks`.
+5. Si la búsqueda híbrida falla, cae a `rag.usp_get_candidate_chunks`.
+6. Aplica reglas Python deterministas.
+7. Construye recomendación, motivos, acciones y evidencias.
+8. Guarda auditoría con `rag.usp_insert_answer_audit`.
+9. Devuelve JSON al frontend.
 
 El motor declarado es:
 
@@ -448,7 +544,7 @@ El motor declarado es:
 frasohome-rag-rulebased-v1
 ```
 
-La demo no llama a un LLM externo. La decisión es determinista, explicable y auditable.
+La demo no llama a un LLM externo para redactar la respuesta. La decisión sigue siendo determinista, explicable y auditable, pero la recuperación ya combina señales lexicales y semánticas sobre vectores nativos en SQL.
 
 ## Conexión administrada entre UDF y SQL
 
@@ -557,25 +653,26 @@ La solución incorpora varias decisiones de gobierno:
 - La recuperación filtra por país, canal, categoría y vigencia.
 - La respuesta incluye `confidence` y `requiresManualReview`.
 - El nuevo pipeline conserva metadatos desde Markdown hasta SQL.
-- Los embeddings quedan versionados con `EmbeddingModel` y `EmbeddingDimensions`.
+- Los embeddings quedan versionados con `EmbeddingProvider`, `EmbeddingModel`, `EmbeddingDimensions`, `SourceTextHash` y `VectorizedAt`.
 
-## Camino vectorial opcional
+## Camino SQL-native opcional para embeddings
 
 El script:
 
 ```text
-database/sql/90_optional_vector_preview.sql
+database/sql/90_optional_sql_native_embeddings.sql
 ```
 
-prepara un camino opcional si el tenant tiene habilitado el tipo `vector`.
+prepara un camino opcional para generar chunks y embeddings dentro de SQL Database in Fabric.
 
-Intenta añadir:
+Este camino requiere configurar previamente un `EXTERNAL MODEL` de embeddings, por ejemplo contra Azure OpenAI. Una vez creado el modelo, el script añade procedimientos para:
 
-```sql
-rag.Chunks.EmbeddingVector vector(64)
-```
+- Dividir documentos con `AI_GENERATE_CHUNKS`.
+- Generar embeddings con `AI_GENERATE_EMBEDDINGS`.
+- Guardarlos en `rag.ChunkEmbeddings.EmbeddingVector` como `VECTOR(1536)`.
+- Registrar ejecuciones en `rag.VectorizationRuns`.
 
-El flujo principal no depende de esto. Actualmente la recuperación usa T-SQL determinista, pero el repo ya deja preparada la tabla `rag.ChunkEmbeddings` y el pipeline de generación de embeddings.
+El flujo principal no depende de credenciales externas porque usa embeddings deterministas generados en Python, pero la estructura de tablas y procedimientos ya usa las mismas capacidades vectoriales nativas que el camino SQL-native.
 
 ## Scripts principales
 
@@ -633,11 +730,11 @@ La solución muestra una arquitectura RAG gobernada sobre Microsoft Fabric:
 - **Fabric App** proporciona la experiencia de usuario.
 - **Microsoft Entra** autentica al usuario y protege la invocación.
 - **User Data Function** actúa como backend serverless.
-- **SQL Database in Fabric** centraliza datos operacionales, conocimiento, recuperación, permisos y auditoría.
+- **SQL Database in Fabric** centraliza datos operacionales, conocimiento, vectores, recuperación, permisos y auditoría.
 - **Markdown policies** representan una fuente realista de conocimiento empresarial.
 - **Chunking automático** convierte documentos en fragmentos recuperables.
-- **Embeddings versionados** dejan preparado el camino para búsqueda semántica.
-- **Procedimientos SQL** mantienen filtros, scoring y trazabilidad cerca de los datos.
+- **Embeddings versionados** se almacenan como `VECTOR(1536)`.
+- **Procedimientos SQL** mantienen filtros, scoring, `VECTOR_DISTANCE`, `VECTOR_SEARCH` y trazabilidad cerca de los datos.
 - **Rayfin** publica la app estática dentro de Fabric.
 
-El valor técnico de la demo está en que el RAG no se plantea como una caja negra: las políticas se versionan, los chunks se generan, los embeddings se almacenan, las evidencias se citan y cada recomendación queda auditada.
+El valor técnico de la demo está en que el RAG no se plantea como una caja negra: las políticas se versionan, los chunks se generan, los embeddings se almacenan como vectores nativos, la recuperación híbrida es inspeccionable, las evidencias se citan y cada recomendación queda auditada.

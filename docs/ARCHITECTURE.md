@@ -13,7 +13,7 @@ Contiene datos transaccionales y conocimiento de negocio:
 - `fraso.*`: clientes, pedidos, líneas, productos, stock y casos de devolución.
 - `rag.Documents`: políticas internas versionadas.
 - `rag.Chunks`: fragmentos recuperables con metadatos.
-- `rag.ChunkEmbeddings`: embeddings en JSON para fallback portable.
+- `rag.ChunkEmbeddings`: embeddings nativos `VECTOR(1536)` con modelo, proveedor, hash de origen y fecha de vectorización.
 - `rag.AnswerAudit`: auditoría de la pregunta, recuperación, recomendación y evidencias.
 
 ### User Data Functions

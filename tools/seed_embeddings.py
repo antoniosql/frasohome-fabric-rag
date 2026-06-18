@@ -3,7 +3,7 @@
 Genera embeddings deterministas de demo y los guarda en un JSON local.
 
 Este script es opcional. El flujo principal usa recuperación T-SQL. Sirve para enseñar
-cómo se ve un vector de embedding aunque aún no tengas vector search habilitado en SQL.
+cómo se ve un vector de embedding para cargarlo en columnas VECTOR(1536).
 
 Para insertar documentos, chunks y embeddings en rag.Documents, rag.Chunks y
 rag.ChunkEmbeddings usa tools/ingest_policy_markdown.py.
@@ -81,7 +81,7 @@ def resolve_embedding_model(default_model: str = "demo-hash-embedding-v1", provi
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--dimensions", type=int, default=int(os.getenv("RAG_EMBEDDING_DIMENSIONS", "64")))
+    parser.add_argument("--dimensions", type=int, default=int(os.getenv("RAG_EMBEDDING_DIMENSIONS", "1536")))
     parser.add_argument("--provider", choices=["demo", "azure-openai"], default=os.getenv("RAG_EMBEDDING_PROVIDER"))
     parser.add_argument("--out", default="embeddings.preview.json")
     parser.add_argument("texts", nargs="*")

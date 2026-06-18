@@ -51,13 +51,38 @@ IF OBJECT_ID(N'rag.ChunkEmbeddings', N'U') IS NULL
 BEGIN
     CREATE TABLE rag.ChunkEmbeddings
     (
-        ChunkId              bigint          NOT NULL CONSTRAINT PK_RagChunkEmbeddings PRIMARY KEY,
-        EmbeddingModel       nvarchar(120)   NOT NULL,
-        EmbeddingDimensions  int             NOT NULL,
-        EmbeddingJson        nvarchar(max)   NOT NULL,
-        UpdatedAt            datetime2(3)    NOT NULL CONSTRAINT DF_RagChunkEmbeddings_UpdatedAt DEFAULT SYSUTCDATETIME(),
+        ChunkId              bigint           NOT NULL CONSTRAINT PK_RagChunkEmbeddings PRIMARY KEY,
+        EmbeddingProvider    varchar(40)       NOT NULL CONSTRAINT DF_RagChunkEmbeddings_Provider DEFAULT 'demo',
+        EmbeddingModel       nvarchar(120)     NOT NULL,
+        EmbeddingDimensions  int               NOT NULL CONSTRAINT DF_RagChunkEmbeddings_Dimensions DEFAULT 1536,
+        EmbeddingVector      vector(1536)      NOT NULL,
+        SourceTextHash       varbinary(32)     NOT NULL,
+        VectorizedAt         datetime2(3)      NOT NULL CONSTRAINT DF_RagChunkEmbeddings_VectorizedAt DEFAULT SYSUTCDATETIME(),
         CONSTRAINT FK_RagChunkEmbeddings_Chunks FOREIGN KEY (ChunkId) REFERENCES rag.Chunks(ChunkId)
     );
+END;
+GO
+
+IF OBJECT_ID(N'rag.VectorizationRuns', N'U') IS NULL
+BEGIN
+    CREATE TABLE rag.VectorizationRuns
+    (
+        VectorizationRunId   bigint IDENTITY(1,1) NOT NULL CONSTRAINT PK_RagVectorizationRuns PRIMARY KEY,
+        Provider             varchar(40)           NOT NULL,
+        EmbeddingModel       nvarchar(120)         NOT NULL,
+        EmbeddingDimensions  int                   NOT NULL,
+        Source               nvarchar(200)         NOT NULL,
+        ChunkCount           int                   NOT NULL,
+        StartedAt            datetime2(3)          NOT NULL CONSTRAINT DF_RagVectorizationRuns_StartedAt DEFAULT SYSUTCDATETIME(),
+        CompletedAt          datetime2(3)          NULL,
+        Notes                nvarchar(1000)        NULL
+    );
+END;
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_RagChunkEmbeddings_Model' AND object_id = OBJECT_ID(N'rag.ChunkEmbeddings'))
+BEGIN
+    CREATE INDEX IX_RagChunkEmbeddings_Model ON rag.ChunkEmbeddings(EmbeddingModel, EmbeddingProvider);
 END;
 GO
 
