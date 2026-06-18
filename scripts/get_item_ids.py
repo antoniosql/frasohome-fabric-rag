@@ -28,6 +28,8 @@ def parse_json_loose(text: str) -> Any:
 
 def find_item(items_payload: Any, display_name: str, item_type: str | None = None) -> Dict[str, Any] | None:
     if isinstance(items_payload, dict):
+        if isinstance(items_payload.get("text"), dict):
+            items_payload = items_payload["text"]
         items = items_payload.get("value") or items_payload.get("items") or items_payload.get("data") or []
     else:
         items = items_payload
@@ -57,8 +59,8 @@ def main() -> None:
         raise SystemExit("--sql-database-name o FABRIC_SQL_DATABASE_NAME requerido")
 
     payload = parse_json_loose(run(["fab", "api", f"workspaces/{args.workspace_id}/items", "-X", "get"]))
-    sql_item = find_item(payload, args.sql_database_name, None)
-    udf_item = find_item(payload, args.udf_name, None)
+    sql_item = find_item(payload, args.sql_database_name, "SQLDatabase")
+    udf_item = find_item(payload, args.udf_name, "UserDataFunction")
 
     lines = []
     if sql_item:

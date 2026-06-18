@@ -75,7 +75,7 @@ export function isConfigured(): boolean {
 
 export async function answerReturnCase(returnCaseId: string, question: string): Promise<RagAnswer> {
   if (!isConfigured()) {
-    throw new Error('La app no tiene VITE_UDF_FUNCTION_URL / VITE_ENTRA_CLIENT_ID / VITE_ENTRA_TENANT_ID configurados.');
+    throw new Error('La app no tiene VITE_UDF_FUNCTION_URL / VITE_ENTRA_CLIENT_ID / tenant de Entra configurados.');
   }
   const token = await getToken();
   const response = await fetch(udfUrl, {

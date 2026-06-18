@@ -1,5 +1,17 @@
 $ErrorActionPreference = "Stop"
 
+function Set-ScriptEnvValue {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Name,
+        [AllowEmptyString()]
+        [string]$Value
+    )
+
+    Set-Variable -Name $Name -Value $Value -Scope Script
+    Set-Item -Path "Env:$Name" -Value $Value
+}
+
 function Import-DotEnv {
     param(
         [Parameter(Mandatory = $true)]
@@ -32,8 +44,7 @@ function Import-DotEnv {
             $value = $value.Substring(1, $value.Length - 2)
         }
 
-        Set-Variable -Name $name -Value $value -Scope Script
-        Set-Item -Path "Env:$name" -Value $value
+        Set-ScriptEnvValue -Name $name -Value $value
     }
 }
 
@@ -64,6 +75,34 @@ function Test-EnvValue {
 
     $value = [string]$variable.Value
     return -not ([string]::IsNullOrWhiteSpace($value) -or $value -eq "00000000-0000-0000-0000-000000000000")
+}
+
+function Copy-EnvValue {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$From,
+        [Parameter(Mandatory = $true)]
+        [string]$To
+    )
+
+    $source = Get-Variable -Name $From -Scope Script -ErrorAction SilentlyContinue
+    if ($null -ne $source) {
+        Set-ScriptEnvValue -Name $To -Value ([string]$source.Value)
+    }
+}
+
+function Resolve-EnvAliases {
+    if ((-not (Test-EnvValue "FABRIC_TENANT_ID")) -and (Test-EnvValue "FAB_TENANT_ID")) {
+        Copy-EnvValue -From "FAB_TENANT_ID" -To "FABRIC_TENANT_ID"
+    }
+
+    if ((-not (Test-EnvValue "FAB_TENANT_ID")) -and (Test-EnvValue "FABRIC_TENANT_ID")) {
+        Copy-EnvValue -From "FABRIC_TENANT_ID" -To "FAB_TENANT_ID"
+    }
+
+    if ((-not (Test-EnvValue "VITE_ENTRA_TENANT_ID")) -and (Test-EnvValue "FABRIC_TENANT_ID")) {
+        Copy-EnvValue -From "FABRIC_TENANT_ID" -To "VITE_ENTRA_TENANT_ID"
+    }
 }
 
 function Get-SqlCmdAuthArguments {
@@ -98,6 +137,35 @@ function Get-SqlCmdAuthArguments {
     }
 }
 
+function Format-CommandForError {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Command,
+        [string[]]$Arguments = @()
+    )
+
+    $redactedArguments = @()
+    $redactNext = $false
+
+    foreach ($argument in $Arguments) {
+        if ($redactNext) {
+            $redactedArguments += "<redacted>"
+            $redactNext = $false
+            continue
+        }
+
+        if ($argument -in @("-P", "--password")) {
+            $redactedArguments += $argument
+            $redactNext = $true
+            continue
+        }
+
+        $redactedArguments += $argument
+    }
+
+    return "$Command $($redactedArguments -join ' ')"
+}
+
 function Invoke-CheckedCommand {
     param(
         [Parameter(Mandatory = $true)]
@@ -107,8 +175,9 @@ function Invoke-CheckedCommand {
 
     & $Command @Arguments
     if ($LASTEXITCODE -ne 0) {
-        throw "El comando falló con código ${LASTEXITCODE}: $Command $($Arguments -join ' ')"
+        throw "El comando falló con código ${LASTEXITCODE}: $(Format-CommandForError -Command $Command -Arguments $Arguments)"
     }
 }
 
 Import-DotEnv -Path ".env" -Required
+Resolve-EnvAliases

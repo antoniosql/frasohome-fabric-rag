@@ -7,7 +7,7 @@ from typing import Any, Dict, List
 import fabric.functions as fn
 
 udf = fn.UserDataFunctions()
-SQL_ALIAS = "frasohome_sql"
+SQL_ALIAS = 'frasohomesql'
 MODEL_NAME = "frasohome-rag-rulebased-v1"
 
 

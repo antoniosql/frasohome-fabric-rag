@@ -28,15 +28,17 @@ def require_value(name: str, value: str | None) -> str:
 
 def build_credential(args: argparse.Namespace):
     mode = (args.auth_mode or os.getenv("FABRIC_UDF_AUTH_MODE") or "service-principal").lower()
-    tenant_id = args.tenant or os.getenv("FAB_TENANT_ID") or os.getenv("FABRIC_TENANT_ID")
-    client_id = args.client_id or os.getenv("FAB_SPN_CLIENT_ID") or os.getenv("VITE_ENTRA_CLIENT_ID")
+    tenant_id = args.tenant or os.getenv("FABRIC_TENANT_ID") or os.getenv("FAB_TENANT_ID")
+    service_principal_client_id = args.client_id or os.getenv("FAB_SPN_CLIENT_ID")
+    frontend_tenant_id = args.tenant or os.getenv("VITE_ENTRA_TENANT_ID") or tenant_id
+    frontend_client_id = args.client_id or os.getenv("VITE_ENTRA_CLIENT_ID")
 
     if mode == "service-principal":
         client_secret = args.client_secret or os.getenv("FAB_SPN_CLIENT_SECRET")
         return (
             ClientSecretCredential(
-                tenant_id=require_value("FAB_TENANT_ID", tenant_id),
-                client_id=require_value("FAB_SPN_CLIENT_ID", client_id),
+                tenant_id=require_value("FABRIC_TENANT_ID", tenant_id),
+                client_id=require_value("FAB_SPN_CLIENT_ID", service_principal_client_id),
                 client_secret=require_value("FAB_SPN_CLIENT_SECRET", client_secret),
             ),
             "https://analysis.windows.net/powerbi/api/.default",
@@ -62,8 +64,8 @@ def build_credential(args: argparse.Namespace):
     if mode == "interactive":
         return (
             InteractiveBrowserCredential(
-                tenant_id=require_value("VITE_ENTRA_TENANT_ID", tenant_id),
-                client_id=require_value("VITE_ENTRA_CLIENT_ID", client_id),
+                tenant_id=require_value("VITE_ENTRA_TENANT_ID or FABRIC_TENANT_ID", frontend_tenant_id),
+                client_id=require_value("VITE_ENTRA_CLIENT_ID", frontend_client_id),
             ),
             "https://analysis.windows.net/powerbi/api/user_impersonation",
         )

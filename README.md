@@ -96,7 +96,7 @@ az ad app credential reset --id "<application-client-id>" --display-name "frasoh
 Rellena `.env` con:
 
 ```dotenv
-FAB_TENANT_ID="00000000-0000-0000-0000-000000000000"
+FABRIC_TENANT_ID="00000000-0000-0000-0000-000000000000"
 FAB_SPN_CLIENT_ID="00000000-0000-0000-0000-000000000000"
 FAB_SPN_CLIENT_SECRET="<client-secret>"
 FABRIC_SQL_AUTH_MODE="service-principal"
@@ -128,30 +128,14 @@ Después, en el workspace de Fabric:
 2. Añade el service principal o el grupo de seguridad.
 3. Asigna al menos **Contributor** para crear/desplegar items; usa **Admin** solo si tu tenant lo requiere para operaciones concretas.
 
-### 4. Prepara la identidad para SQL Database
-
-Cuando la SQL Database exista y tengas un administrador Microsoft Entra con permisos sobre ella, crea el usuario de base de datos para el service principal:
-
-```sql
-CREATE USER [frasohome-fabric-deployer] FROM EXTERNAL PROVIDER;
-ALTER ROLE db_owner ADD MEMBER [frasohome-fabric-deployer];
-```
-
-Ese rol amplio es práctico para despliegue de demo porque los scripts crean esquemas, tablas, procedimientos y permisos. Para una identidad de ejecución con permisos mínimos, usa el rol creado por `database/sql/06_create_security.sql`:
-
-```sql
-CREATE USER [frasohome-rag-runtime] FROM EXTERNAL PROVIDER;
-ALTER ROLE frasohome_rag_executor ADD MEMBER [frasohome-rag-runtime];
-```
-
-### 5. Opción con managed identity
+### 4. Opción con managed identity
 
 Si ejecutas los scripts desde una VM, Azure DevOps agent, Function, Container App u otro recurso Azure con managed identity:
 
 1. Activa una **system-assigned managed identity** o asigna una **user-assigned managed identity**.
 2. Añade esa identidad al grupo autorizado en Fabric Admin Portal.
 3. Añade esa identidad al workspace de Fabric.
-4. Crea su usuario en la SQL Database igual que con el service principal.
+4. Crea su usuario en la SQL Database después de crear la base, igual que con el service principal.
 
 Variables para managed identity del sistema:
 
@@ -172,7 +156,7 @@ FABRIC_UDF_AUTH_MODE="managed-identity"
 FABRIC_UDF_MANAGED_IDENTITY_CLIENT_ID="00000000-0000-0000-0000-000000000000"
 ```
 
-### 6. Crea la app registration del frontend
+### 5. Crea la app registration del frontend
 
 La identidad anterior automatiza despliegue y pruebas. La app React necesita otra app registration pública para que el usuario final inicie sesión con MSAL:
 
@@ -186,8 +170,9 @@ Rellena:
 
 ```dotenv
 VITE_ENTRA_CLIENT_ID="00000000-0000-0000-0000-000000000000"
-VITE_ENTRA_TENANT_ID="00000000-0000-0000-0000-000000000000"
 ```
+
+`VITE_ENTRA_TENANT_ID` se genera desde `FABRIC_TENANT_ID` al ejecutar `scripts/deploy_app.ps1`; solo necesitas definirlo aparte si el frontend usa otro tenant.
 
 Más detalle y variantes con certificado o federated credentials: [Autenticación no interactiva](docs/NON_INTERACTIVE_AUTH.md).
 
@@ -260,7 +245,7 @@ FABRIC_SQL_DATABASE_NAME="FrasoHomeRagDB"
 .\scripts\bootstrap.ps1
 ```
 
-Para evitar autenticación interactiva con navegador, configura las variables `FAB_*` y `FABRIC_SQL_AUTH_MODE` descritas en [Autenticación no interactiva](docs/NON_INTERACTIVE_AUTH.md). `fab` y `sqlcmd` pueden usar service principal o managed identity; Rayfin aún puede requerir sesión interactiva para `deploy_app.ps1` porque sus opciones de service principal aparecen en la ayuda pero no están soportadas actualmente.
+Para evitar autenticación interactiva con navegador, configura `FABRIC_TENANT_ID`, las variables `FAB_*` de identidad y `FABRIC_SQL_AUTH_MODE` descritas en [Autenticación no interactiva](docs/NON_INTERACTIVE_AUTH.md). Los scripts reutilizan `FABRIC_TENANT_ID` como `FAB_TENANT_ID` cuando `fab` lo necesita; Rayfin aún puede requerir sesión interactiva para `deploy_app.ps1` porque sus opciones de service principal aparecen en la ayuda pero no están soportadas actualmente.
 
 4. Crea la SQL Database en Fabric:
 
@@ -268,39 +253,90 @@ Para evitar autenticación interactiva con navegador, configura las variables `F
 .\scripts\deploy_fabric_sql.ps1
 ```
 
-5. Copia el **server name** de la conexión SQL desde Fabric y completa `.env`:
+5. Prepara la identidad para conectar a la SQL Database.
+
+`apply_sql.ps1` no puede crear el usuario con el que va a autenticarse, porque ese usuario ya debe existir para que `sqlcmd` pueda abrir conexión. Una vez creada la base, entra con un administrador Microsoft Entra de la SQL Database y crea el usuario de despliegue. Para SQL Database in Fabric, el patrón más directo para service principals es crear el usuario con el **Application (client) ID**:
+
+```sql
+SELECT DB_NAME() AS current_database;
+
+DECLARE @principalName sysname = N'frasohome-fabric-deployer';
+DECLARE @clientId uniqueidentifier = '<FAB_SPN_CLIENT_ID>';
+DECLARE @sid binary(16) = CONVERT(binary(16), @clientId);
+DECLARE @sidLiteral varchar(max) = CONVERT(varchar(max), @sid, 1);
+DECLARE @sql nvarchar(max);
+
+IF EXISTS (SELECT 1 FROM sys.database_principals WHERE name = @principalName AND sid <> @sid)
+BEGIN
+    SET @sql = N'DROP USER ' + QUOTENAME(@principalName) + N';';
+    EXEC (@sql);
+END;
+
+IF NOT EXISTS (SELECT 1 FROM sys.database_principals WHERE name = @principalName)
+BEGIN
+    SET @sql = N'CREATE USER ' + QUOTENAME(@principalName) + N' WITH SID = ' + @sidLiteral + N', TYPE = E;';
+    EXEC (@sql);
+END;
+
+SET @sql = N'ALTER ROLE db_owner ADD MEMBER ' + QUOTENAME(@principalName) + N';';
+EXEC (@sql);
+
+SELECT
+    DB_NAME() AS current_database,
+    name,
+    type_desc,
+    IIF(sid = @sid, 1, 0) AS sid_matches_client_id
+FROM sys.database_principals
+WHERE name = @principalName;
+```
+
+Si `DROP USER` falla porque ese usuario posee objetos o esquemas, usa otro `@principalName` nuevo para el mismo `@clientId`, por ejemplo `frasohome-fabric-deployer-spn`.
+
+Además del usuario SQL, la identidad debe tener permiso **Read** sobre el item SQL Database en Fabric. Si sigue apareciendo `Cannot open server ... requested by the login`, revisa en Fabric que el service principal o el grupo donde está tenga acceso al workspace o al item `FrasoHomeRagDB`.
+
+Ese rol amplio es práctico para una demo porque los scripts crean esquemas, tablas, procedimientos y permisos. Después de ejecutar `apply_sql.ps1`, si quieres una identidad de ejecución con permisos mínimos, usa el rol `frasohome_rag_executor` creado por `database/sql/06_create_security.sql`. Cambia el placeholder por un usuario, grupo, service principal o managed identity que exista realmente en Entra:
+
+```sql
+CREATE USER [<runtime-user-upn-or-display-name>] FROM EXTERNAL PROVIDER;
+ALTER ROLE frasohome_rag_executor ADD MEMBER [<runtime-user-upn-or-display-name>];
+```
+
+El error `Principal '<nombre>' could not be found` significa que SQL no encuentra esa identidad en Entra o que ese tipo de principal no está soportado con ese nombre.
+
+6. Copia el **server name** de la conexión SQL desde Fabric y completa `.env`:
 
 ```bash
 FABRIC_SQL_SERVER="tcp:<server>.database.fabric.microsoft.com,1433"
 FABRIC_SQL_DATABASE_NAME="FrasoHomeRagDB"
 ```
 
-6. Aplica DDL, datos de demo y procedimientos:
+7. Aplica DDL, datos de demo y procedimientos:
 
 ```powershell
 .\scripts\apply_sql.ps1
 ```
 
-7. Publica la User Data Function:
+8. Publica la User Data Function:
 
 ```powershell
 .\scripts\publish_udf.ps1
 ```
 
-8. En el portal de Fabric, abre el item `FrasoHome_RAG_UDF`, confirma/publica si el portal lo solicita, habilita el endpoint público de `answerReturnCase` y copia su URL en `.env`:
+9. En el portal de Fabric, abre el item `FrasoHome_RAG_UDF`, confirma/publica si el portal lo solicita, habilita el endpoint público de `answerReturnCase` y copia su URL en `.env`:
 
 ```bash
 VITE_UDF_FUNCTION_URL="https://.../answerReturnCase"
 ```
 
-9. Configura una app registration en Microsoft Entra para el frontend y rellena:
+10. Configura una app registration en Microsoft Entra para el frontend y rellena:
 
 ```bash
 VITE_ENTRA_CLIENT_ID="..."
-VITE_ENTRA_TENANT_ID="..."
 ```
 
-10. Despliega la Fabric App:
+El tenant se toma de `FABRIC_TENANT_ID` durante `deploy_app.ps1`.
+
+11. Despliega la Fabric App:
 
 ```powershell
 .\scripts\deploy_app.ps1

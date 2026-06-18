@@ -59,7 +59,7 @@ export default function App() {
 
       {!isConfigured() && (
         <section className="warning">
-          <strong>Configuración pendiente.</strong> Define <code>VITE_UDF_FUNCTION_URL</code>, <code>VITE_ENTRA_CLIENT_ID</code> y <code>VITE_ENTRA_TENANT_ID</code> antes de invocar la UDF.
+          <strong>Configuración pendiente.</strong> Define <code>VITE_UDF_FUNCTION_URL</code>, <code>VITE_ENTRA_CLIENT_ID</code> y <code>FABRIC_TENANT_ID</code> antes de invocar la UDF.
         </section>
       )}
 

@@ -3,10 +3,10 @@
   "runtime": "PYTHON",
   "connectedDataSources": [
     {
-      "alias": "frasohome_sql",
-      "artifactId": "00000000-0000-0000-0000-000000000000",
+      "alias": "frasohomesql",
+      "artifactId": "bd00a6d6-24ee-4b26-98c9-2a4fbe416a18",
       "artifactType": "SqlDbNative",
-      "workspaceId": "00000000-0000-0000-0000-000000000000"
+      "workspaceId": "4d585ddf-d206-47c0-bceb-332ed71adbb0"
     }
   ],
   "functions": [

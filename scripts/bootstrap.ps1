@@ -44,4 +44,4 @@ else {
     Write-Warning "fab no está instalado o no está en el PATH."
 }
 
-Write-Host "Bootstrap finalizado. Configura las variables FAB_* en .env para autenticación no interactiva."
+Write-Host "Bootstrap finalizado. Configura FABRIC_TENANT_ID y las variables FAB_* de identidad en .env para autenticación no interactiva."

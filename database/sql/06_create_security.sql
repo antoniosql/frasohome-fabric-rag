@@ -12,7 +12,9 @@ GRANT SELECT ON SCHEMA::rag TO frasohome_rag_executor;
 GRANT EXECUTE ON SCHEMA::rag TO frasohome_rag_executor;
 GO
 
-PRINT 'Role frasohome_rag_executor created. Add users/service principals as needed:';
+PRINT 'Role frasohome_rag_executor created. Create an Entra user first, then add it as needed:';
+PRINT 'CREATE USER [user@domain.com] FROM EXTERNAL PROVIDER;';
 PRINT 'ALTER ROLE frasohome_rag_executor ADD MEMBER [user@domain.com];';
+PRINT 'For Fabric service principals, create the user with SID = application/client id and TYPE = E.';
 PRINT 'ALTER ROLE frasohome_rag_executor ADD MEMBER [service-principal-display-name];';
 GO

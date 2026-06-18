@@ -10,6 +10,11 @@ if (-not (Get-Command sqlcmd -ErrorAction SilentlyContinue)) {
 }
 
 $sqlAuthArguments = Get-SqlCmdAuthArguments
+$sqlAuthMode = if (Test-EnvValue "FABRIC_SQL_AUTH_MODE") { $FABRIC_SQL_AUTH_MODE.ToLowerInvariant() } else { "default" }
+
+if ($sqlAuthMode -eq "service-principal") {
+    Write-Host "Autenticación SQL: service principal. Debe existir un usuario en la base para el display name de esa identidad antes de ejecutar este script."
+}
 
 $sqlScripts = @()
 $sqlScripts += Get-ChildItem -Path "database/sql/[0-8][0-9]_*.sql" | Sort-Object Name

@@ -7,7 +7,7 @@ jobs:
   deploy-udf-definition:
     runs-on: ubuntu-latest
     env:
-      FAB_TENANT_ID: ${{ secrets.FAB_TENANT_ID }}
+      FAB_TENANT_ID: ${{ secrets.FABRIC_TENANT_ID }}
       FAB_SPN_CLIENT_ID: ${{ secrets.FAB_SPN_CLIENT_ID }}
       FAB_SPN_CLIENT_SECRET: ${{ secrets.FAB_SPN_CLIENT_SECRET }}
     steps:

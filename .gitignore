@@ -1,5 +1,6 @@
 .env
 .env.*
+.env copy*
 !.env.example
 *.local
 
@@ -33,6 +34,7 @@ Thumbs.db
 
 # Fabric / demo generated files
 fabric/items/config.yml
+fabric/.deploy/
 fabric/items/**/*.bak
 app/**/rayfin/.env
 app/**/.env.local
