@@ -39,7 +39,10 @@ Herramientas locales:
 - Node.js 20 o superior.
 - `sqlcmd` moderno con autenticación Microsoft Entra y soporte de `--authentication-method`.
 - Fabric CLI, instalado desde el entorno Python del repo.
-- Rayfin CLI vía `npx rayfin ...`.
+
+Herramientas instaladas automáticamente:
+
+- Rayfin CLI (`@microsoft/rayfin-cli`), se instala como `devDependency` en el script `deploy_app.ps1`.
 
 Requisitos en Microsoft Fabric:
 

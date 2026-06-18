@@ -14,7 +14,7 @@ Configura `.env` con service principal o managed identity siguiendo `docs/NON_IN
 .\scripts\bootstrap.ps1
 ```
 
-Nota: Rayfin todavía no soporta service principal en `rayfin login`; `deploy_app.ps1` puede requerir una sesión Rayfin interactiva previa.
+Nota: Rayfin CLI se instala automáticamente durante `deploy_app.ps1`. En caso de requerir una sesión Rayfin previa, ejecuta `npx rayfin login` desde el directorio `app/frasohome-returnops-app`.
 
 ## 2. Crear SQL Database
 

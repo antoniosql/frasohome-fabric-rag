@@ -22,6 +22,8 @@ Push-Location $appDir
 try {
     Invoke-CheckedCommand -Command "npm" -Arguments @("install")
     Invoke-CheckedCommand -Command "npm" -Arguments @("run", "build")
+    Write-Host "Installing Rayfin CLI locally..."
+    Invoke-CheckedCommand -Command "npm" -Arguments @("install", "--save-dev", "@microsoft/rayfin-cli")
     $rayfinArguments = @("rayfin", "up", "--workspace-id", $FABRIC_WORKSPACE_ID, "--yes")
     if (Test-EnvValue "FABRIC_TENANT_ID") {
         $rayfinArguments += @("--tenant", $FABRIC_TENANT_ID)

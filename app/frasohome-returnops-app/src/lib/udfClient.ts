@@ -49,7 +49,7 @@ async function ensureMsal() {
 
 async function getToken(): Promise<string> {
   await ensureMsal();
-  const scopes = ['https://analysis.windows.net/powerbi/api/user_impersonation'];
+  const scopes = ['https://analysis.windows.net/powerbi/api/.default'];
   let account: AccountInfo | null = msal.getActiveAccount();
   if (!account) {
     const accounts = msal.getAllAccounts();

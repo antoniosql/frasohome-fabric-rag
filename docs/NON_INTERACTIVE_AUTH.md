@@ -136,7 +136,13 @@ python tools/call_udf.py --auth-mode service-principal
 
 ## Limitación actual de Rayfin
 
-Según la referencia actual de Microsoft, `rayfin login` muestra opciones de service principal, pero esas opciones todavía no están soportadas. Por eso `deploy_app.ps1` puede requerir una sesión Rayfin interactiva previa hasta que Rayfin habilite autenticación no interactiva real.
+Rayfin CLI todavía no soporta autenticación no interactiva (service principal) en `rayfin up`. Por eso `deploy_app.ps1` **requiere una sesión Rayfin interactiva** aún cuando todos los demás scripts se ejecuten sin navegador. 
+
+Cuando `deploy_app.ps1` llama a `npx rayfin up`, se abrirá un navegador para autenticar tu cuenta personal de Fabric. Las identidades de service principal se usan solo para SQL, UDF y pruebas, no para el despliegue de la app.
+
+Si necesitas un despliegue completamente automatizado, puedes:
+1. Pre-autenticar en una sesión local: `npx rayfin login` desde `app/frasohome-returnops-app`
+2. Cachear esa sesión y reutilizarla en pipelines CI/CD (depende de cómo tu runner maneje cookies/cache de Rayfin)
 
 ## Login del usuario final
 

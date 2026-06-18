@@ -67,7 +67,7 @@ def build_credential(args: argparse.Namespace):
                 tenant_id=require_value("VITE_ENTRA_TENANT_ID or FABRIC_TENANT_ID", frontend_tenant_id),
                 client_id=require_value("VITE_ENTRA_CLIENT_ID", frontend_client_id),
             ),
-            "https://analysis.windows.net/powerbi/api/user_impersonation",
+            "https://analysis.windows.net/powerbi/api/.default",
         )
 
     raise ValueError("FABRIC_UDF_AUTH_MODE debe ser service-principal, managed-identity, default o interactive.")
@@ -85,7 +85,10 @@ def invoke(url: str, args: argparse.Namespace, payload: Dict[str, Any]) -> Dict[
         json=payload,
         timeout=60,
     )
-    response.raise_for_status()
+    if not response.ok:
+        raise RuntimeError(
+            f"HTTP {response.status_code} {response.reason}: {response.text}"
+        )
     data = response.json()
     return data.get("output", data)
 
