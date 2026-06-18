@@ -41,3 +41,4 @@ app/**/.env.local
 .fabric.generated.env
 *.zip
 embeddings.preview.json
+database/generated/

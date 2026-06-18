@@ -359,6 +359,84 @@ El script `deploy_all.ps1` automatiza la mayor parte del flujo, pero hay dos dat
 .\scripts\smoke_test_sql.ps1
 ```
 
+## Ingesta realista de políticas Markdown
+
+Además de los datos semilla SQL, el repo incluye un flujo más parecido a producción para convertir políticas Markdown en conocimiento RAG:
+
+```text
+docs/policies/*.md
+        │
+        ▼
+tools/ingest_policy_markdown.py
+        ├─ lee frontmatter
+        ├─ genera chunks por secciones/párrafos
+        ├─ calcula embeddings deterministas de demo
+        └─ emite SQL idempotente
+        │
+        ▼
+scripts/ingest_policy_markdown.ps1
+        └─ inserta en rag.Documents, rag.Chunks y rag.ChunkEmbeddings con sqlcmd
+```
+
+Ejecuta:
+
+```powershell
+.\scripts\ingest_policy_markdown.ps1
+```
+
+El script lee por defecto `docs/policies`, genera `database/generated/ingest_policy_markdown.sql`, lo aplica en la SQL Database y ejecuta `database/sql/98_smoke_test_markdown_ingestion.sql`.
+
+El smoke test comprueba que los documentos Markdown `MD-POL-DMG-010` y `MD-POL-VIP-011` aparecen entre los chunks candidatos para una pregunta similar a la demo:
+
+```text
+El cliente Gold quiere devolver un sofá modular comprado online hace 34 días. Indica que llegó con una pata dañada, conserva fotos del embalaje y solicita reemplazo urgente. ¿Debemos aprobar devolución, reemplazo o revisión manual?
+```
+
+Los embeddings generados son deterministas y locales (`demo-hash-embedding-v1`) para que la demo no dependa de servicios externos. En una implantación real, esa función sería el punto natural para llamar a Azure OpenAI / Foundry embeddings y guardar el vector resultante en `rag.ChunkEmbeddings` o en una columna `vector` si está habilitada.
+
+## Búsqueda híbrida lexical + vectorial
+
+La recuperación base de la UDF usa `rag.usp_get_candidate_chunks`: filtra por contexto del caso y calcula un score lexical de negocio con T-SQL. Para enseñar un patrón híbrido más realista, el repo añade `rag.usp_get_hybrid_candidate_chunks`.
+
+Ese procedimiento combina:
+
+- **Lexical score**: coincidencias por país, canal, categoría, vigencia y señales como daño, embalaje, fotos, reemplazo, stock, cliente Gold/Platinum o producto voluminoso.
+- **Vector score**: similitud coseno entre el embedding de la pregunta y los embeddings guardados en `rag.ChunkEmbeddings`.
+- **Hybrid score**: mezcla ponderada de ambos scores.
+
+Ejecuta una búsqueda híbrida de prueba:
+
+```powershell
+.\scripts\hybrid_search.ps1
+```
+
+El script:
+
+1. Aplica `database/sql/07_create_hybrid_search.sql`.
+2. Genera el embedding de la pregunta con `tools/render_hybrid_search_sql.py`.
+3. Renderiza `database/generated/hybrid_search_query.sql`.
+4. Ejecuta `rag.usp_get_hybrid_candidate_chunks` con `sqlcmd`.
+
+Pesos configurables:
+
+```dotenv
+RAG_HYBRID_LEXICAL_WEIGHT="0.55"
+RAG_HYBRID_VECTOR_WEIGHT="0.45"
+```
+
+Por defecto los embeddings son deterministas de demo. Para usar embeddings reales de Azure OpenAI en la ingesta y en la consulta, configura:
+
+```dotenv
+RAG_EMBEDDING_PROVIDER="azure-openai"
+RAG_USE_EXTERNAL_MODELS="true"
+AZURE_OPENAI_ENDPOINT="https://<recurso>.openai.azure.com"
+AZURE_OPENAI_API_KEY="<api-key>"
+AZURE_OPENAI_EMBEDDING_DEPLOYMENT="<deployment-name>"
+AZURE_OPENAI_API_VERSION="2024-10-21"
+```
+
+La regla importante es que documentos y preguntas deben usar el mismo proveedor y modelo de embeddings.
+
 ## Probar la User Data Function desde consola
 
 ```powershell
